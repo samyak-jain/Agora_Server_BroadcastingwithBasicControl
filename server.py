@@ -4,17 +4,20 @@ import traceback
 import tornado.httpserver
 import tornado.ioloop
 import tornado.web
-from motor import motor_tornado as MT
-from tornado.options import define, options
 import tornado.escape
 import jwt
-from functools import wraps
 
-from typing import Callable
+from functools import wraps
+from typing import Callable, Optional, Any
+from dotenv import load_dotenv
+from tornado.escape import native_str, parse_qs_bytes
+from motor import motor_tornado as MT
+from tornado.options import define, options
+
 
 define("port", default=8080, help="runs on the given port", type=int)
 
-def protected(f: Callable[..., None]) -> Callable[..., None]:
+def protected(f: Callable[..., None]) -> Optional[Callable[..., None]]:
     @wraps(f)
     def wrapper(*args, **kwargs):
         token = tornado.escape.json_decode(args[0].request.body)
@@ -50,7 +53,12 @@ class BaseHandler(tornado.web.RequestHandler):
     def prepare(self) -> None:
         self.set_header('Content-Type', 'application/json')
 
-    def write_error(self, status_code: str, **kwargs) -> None:
+    def extract_data(self, data: Dict[str, List[bytes]], attributes: List[str]) -> None:
+        for index, value in enumerate(map(lambda x: x[0].decode("utf-8"), [data[attr] for attr in attributes])):
+            setattr(self, attributes[index], value)
+
+
+    def write_error(self, status_code: int, **kwargs: Any) -> None:
         self.set_header('Content-Type', 'application/json')
         if self.settings.get("serve_traceback") and "exc_info" in kwargs:
             # in debug mode, try to send a traceback
@@ -89,11 +97,13 @@ class PingHandler(BaseHandler):
 
 class AuthHandler(BaseHandler):
     async def post(self) -> None:
-        pass
-
+        data = parse_qs_bytes(native_str(self.request.body), keep_blank_values=True)
+        extract_data(data, ["name", "uid", "broadcaster"])
+        
 
 
 if __name__ == "__main__":
+    load_dotenv()
     options.parse_command_line()
     client = getattr(MT.MotorClient(os.environ['MONGO_URI']), os.environ['DB_NAME'])
     app = tornado.web.Application(
@@ -105,5 +115,5 @@ if __name__ == "__main__":
         db_client = client,
     )
     http_server = tornado.httpserver.HTTPServer(app)
-    http_server.listen(os.environ.get('PORT', options.port))
+    http_server.listen(int(os.environ.get('PORT', options.port)))
     tornado.ioloop.IOLoop.instance().start()
