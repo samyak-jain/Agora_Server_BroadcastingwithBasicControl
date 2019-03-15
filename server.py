@@ -12,11 +12,6 @@ from functools import wraps
 
 define("port", default=8080, help="runs on the given port", type=int)
 
-
-class MyAppException(tornado.web.HTTPError):
-    pass
-
-
 def protected(f):
     @wraps(f)
     def wrapper(*args, **kwargs):
@@ -41,11 +36,13 @@ def Authenticated(f):
     return wrapper
 
 
+class MyAppException(tornado.web.HTTPError):
+    pass
+
 class BaseHandler(tornado.web.RequestHandler):
+    @property
     def db(self):
-        clientz = self.settings['db_client']
-        db = clientz.tornado
-        return db
+        return self.settings['db_client']
 
     def write_error(self, status_code, **kwargs):
         self.set_header('Content-Type', 'application/json')
@@ -81,6 +78,7 @@ class my404handler(BaseHandler):
 
 if __name__ == "__main__":
     options.parse_command_line()
+    client = getattr(motor_tornado.MotorClient(os.environ['MONGO_URI']), os.environ['DB_NAME'])
     app = tornado.web.Application(
         handlers=[
         ],
@@ -88,5 +86,5 @@ if __name__ == "__main__":
         db_client = client,
     )
     http_server = tornado.httpserver.HTTPServer(app)
-    http_server.listen(os.environ.get("PORT", options.port))
+    http_server.listen(os.environ.get('PORT', options.port))
     tornado.ioloop.IOLoop.instance().start()
