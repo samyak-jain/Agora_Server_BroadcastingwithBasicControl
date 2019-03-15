@@ -1,0 +1,16 @@
+[tool.poetry]
+name = "agora_broadcasting"
+version = "0.1.0"
+description = ""
+authors = ["samyak-jain <samtan106@gmail.com>"]
+
+[tool.poetry.dependencies]
+python = "^3.7"
+tornado = "^6.0"
+python-dotenv = "^0.10.1"
+
+[tool.poetry.dev-dependencies]
+
+[build-system]
+requires = ["poetry>=0.12"]
+build-backend = "poetry.masonry.api"
