@@ -4,15 +4,17 @@ import traceback
 import tornado.httpserver
 import tornado.ioloop
 import tornado.web
-from motor import motor_tornado
+from motor import motor_tornado as MT
 from tornado.options import define, options
 import tornado.escape
 import jwt
 from functools import wraps
 
+from typing import Callable
+
 define("port", default=8080, help="runs on the given port", type=int)
 
-def protected(f):
+def protected(f: Callable[..., None]) -> Callable[..., None]:
     @wraps(f)
     def wrapper(*args, **kwargs):
         token = tornado.escape.json_decode(args[0].request.body)
@@ -21,10 +23,11 @@ def protected(f):
             return f(*args, **kwargs)
         else:
             raise MyAppException(reason="Invalid Token", status_code=401)
+
     return wrapper
 
 
-def Authenticated(f):
+def Authenticated(f: Callable[..., None]) -> Callable[..., None]:
     @wraps(f)
     def wrapper(*args, **kwargs):
         token = tornado.escape.json_decode(args[0].request.body)
@@ -41,10 +44,13 @@ class MyAppException(tornado.web.HTTPError):
 
 class BaseHandler(tornado.web.RequestHandler):
     @property
-    def db(self):
+    def db(self) -> MT.MotorDatabase:
         return self.settings['db_client']
 
-    def write_error(self, status_code, **kwargs):
+    def prepare(self) -> None:
+        self.set_header('Content-Type', 'application/json')
+
+    def write_error(self, status_code: str, **kwargs) -> None:
         self.set_header('Content-Type', 'application/json')
         if self.settings.get("serve_traceback") and "exc_info" in kwargs:
             # in debug mode, try to send a traceback
@@ -66,21 +72,34 @@ class BaseHandler(tornado.web.RequestHandler):
 
 
 class my404handler(BaseHandler):
-    def get(self):
-        self.set_header('Content-Type', 'application/json')
+    async def get(self) -> None:
         self.write(json.dumps({
                 'status_code': 404,
-                'message': 'illegal call.'
-        }))
+                'message': 'Illegal call'
+                }))
 
+
+class PingHandler(BaseHandler):
+    async def get(self) -> None:
+        self.write(json.dumps({
+                'status_code': 200,
+                'message': 'Looks good'
+            }))
+
+
+class AuthHandler(BaseHandler):
+    async def post(self) -> None:
+        pass
 
 
 
 if __name__ == "__main__":
     options.parse_command_line()
-    client = getattr(motor_tornado.MotorClient(os.environ['MONGO_URI']), os.environ['DB_NAME'])
+    client = getattr(MT.MotorClient(os.environ['MONGO_URI']), os.environ['DB_NAME'])
     app = tornado.web.Application(
         handlers=[
+            (r"/", PingHandler),
+            (r"/auth", AuthHandler)
         ],
         default_handler_class = my404handler,
         db_client = client,
