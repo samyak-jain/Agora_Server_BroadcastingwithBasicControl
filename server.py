@@ -5,7 +5,6 @@ import tornado.httpserver
 import tornado.ioloop
 import tornado.web
 import tornado.escape
-import pathlib
 import firebase_admin
 
 from firebase_admin import credentials
@@ -47,20 +46,16 @@ def Authenticated(f: Callable[..., None]) -> Callable[..., None]:
     return wrapper
 """
 
+
 class MyAppException(tornado.web.HTTPError):
     pass
 
+
 class BaseHandler(tornado.web.RequestHandler):
     @staticmethod
-    def db() -> Reference:
-        cred = credentials.Certificate(Path(f"./{os.environ['SERVICE_ACCOUNT_FILE']}"))
-
-        # Initialize the app with a service account, granting admin privileges
-        firebase_admin.initialize_app(cred, {
-            'databaseURL': os.environ['DB_URL']
-        })
-
-        return db.reference('agora_broadcasting')     
+    @lru_cache(maxsize=None)
+    def db(collection: str) -> Reference:
+        return db.reference(collection)
 
     def prepare(self) -> None:
         self.set_header('Content-Type', 'application/json')
@@ -68,7 +63,6 @@ class BaseHandler(tornado.web.RequestHandler):
     def extract_data(self, data: Dict[str, List[bytes]], attributes: List[str]) -> None:
         for index, value in enumerate(map(lambda x: x[0].decode("utf-8"), [data[attr] for attr in attributes])):
             setattr(self, attributes[index], value)
-
 
     def write_error(self, status_code: int, **kwargs: Any) -> None:
         self.set_header('Content-Type', 'application/json')
@@ -87,8 +81,6 @@ class BaseHandler(tornado.web.RequestHandler):
                     'status_code': status_code,
                     'message': self._reason,
                 }))
-
-
 
 
 class my404handler(BaseHandler):
@@ -112,8 +104,7 @@ class AuthHandler(BaseHandler):
         data = parse_qs_bytes(native_str(self.request.body), keep_blank_values=True)
         self.extract_data(data, ["name", "uid", "broadcaster"])
 
-        db = self.db()
-        users = db.child("users") # Get collection
+        users = self.db("users") # Get collection
 
         users.child(self.uid).set({
                 "name": self.name,
@@ -126,18 +117,26 @@ class AuthHandler(BaseHandler):
             }))
 
 
-
-
 if __name__ == "__main__":
     load_dotenv()
     options.parse_command_line()
+
+    cred = credentials.Certificate(str(Path(f"./{os.environ['SERVICE_ACCOUNT_FILE']}")))
+
+    # Initialize the app with a service account, granting admin privileges
+    firebase_admin.initialize_app(cred, {
+        'databaseURL': os.environ['DB_URL']
+    })
+
     app = tornado.web.Application(
         handlers=[
             (r"/", PingHandler),
             (r"/auth", AuthHandler)
         ],
         default_handler_class = my404handler,
+        debug=True,
     )
     http_server = tornado.httpserver.HTTPServer(app)
+    print("Listening")
     http_server.listen(int(os.environ.get('PORT', options.port)))
     tornado.ioloop.IOLoop.instance().start()
