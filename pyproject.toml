@@ -9,6 +9,7 @@ python = "^3.7"
 tornado = "^6.0"
 python-dotenv = "^0.10.1"
 motor = "^2.0"
+firebase_admin = "^2.16"
 
 [tool.poetry.dev-dependencies]
 mypy = "^0.670.0"
