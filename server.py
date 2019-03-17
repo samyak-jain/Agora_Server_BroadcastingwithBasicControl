@@ -11,9 +11,12 @@ import tornado.web
 from dotenv import load_dotenv
 from firebase_admin import credentials
 from firebase_admin import db
+from firebase_admin.credentials import Certificate
 from firebase_admin.db import Reference
 from tornado.escape import native_str, parse_qs_bytes
+from tornado.httpserver import HTTPServer
 from tornado.options import define, options
+from tornado.web import Application
 
 define("port", default=8080, help="runs on the given port", type=int)
 
@@ -23,6 +26,11 @@ class MyAppException(tornado.web.HTTPError):
 
 
 class BaseHandler(tornado.web.RequestHandler):
+    def set_default_headers(self) -> None:
+        self.set_header("Access-Control-Allow-Origin", "*")
+        self.set_header("Access-Control-Allow-Headers", "x-requested-with")
+        self.set_header('Access-Control-Allow-Methods', 'POST, GET, OPTIONS')
+
     @staticmethod
     def db(collection: str) -> Reference:
         return db.reference(collection)
@@ -75,12 +83,13 @@ class PingHandler(BaseHandler):
 
 class AuthHandler(BaseHandler):
     async def post(self) -> None:
-        data: Dict[str, str] = self.extract_data(["name", "uid", "broadcaster"])  # Get the form data
-        users: Reference = self.db("users")  # Get collection
+        data: Dict[str, str] = self.extract_data(['name', 'uid', 'broadcaster', 'channel'])  # Get the form data
+        users: Reference = self.db('users')  # Get collection
 
         users.child(data['uid']).set({
                 'name': data['name'],
-                'broadcaster': data['broadcaster']
+                'broadcaster': data['broadcaster'],
+                'channel': data['channel']
             })
 
         self.write(json.dumps({
@@ -91,13 +100,14 @@ class AuthHandler(BaseHandler):
 
 class MessageHandler(BaseHandler):
     async def post(self) -> None:
-        data: Dict[str, str] = self.extract_data(["channel", "message", "uid"])  # Get the form data
-        channel: Reference = self.db("channel")  # Get collection
-        users: Reference = self.db("users")
+        data: Dict[str, str] = self.extract_data(['message', 'uid'])  # Get the form data
+        users: Reference = self.db("users")  # Get collection
 
         users_ref: Dict[str, Dict[str, str]] = users.get()
+        channel: Reference = self.db(users_ref[data['uid']]['channel'])
 
-        channel.child(data['uid']).set({
+        channel.push().set({
+            'uid': data['uid'],
             'name': users_ref[data['uid']]['name'],
             'broadcaster': users_ref[data['uid']]['broadcaster'],
             'message': data['message']
@@ -113,14 +123,14 @@ if __name__ == "__main__":
     load_dotenv()
     options.parse_command_line()
 
-    cred = credentials.Certificate(str(Path(f"./{os.environ['SERVICE_ACCOUNT_FILE']}").resolve()))
+    cred: Certificate = credentials.Certificate(str(Path(f"./{os.environ['SERVICE_ACCOUNT_FILE']}").resolve()))
 
     # Initialize the app with a service account, granting admin privileges
     firebase_admin.initialize_app(cred, {
         'databaseURL': os.environ['DB_URL']
     })
 
-    app = tornado.web.Application(
+    app: Application = tornado.web.Application(
         handlers=[
             (r"/", PingHandler),
             (r"/auth", AuthHandler),
@@ -130,7 +140,8 @@ if __name__ == "__main__":
         debug=True,
         form_data={},
     )
-    http_server = tornado.httpserver.HTTPServer(app)
-    print("Listening")
-    http_server.listen(int(os.environ.get('PORT', options.port)))
+    http_server: HTTPServer = tornado.httpserver.HTTPServer(app)
+    port: int = int(os.environ.get('PORT', options.port))
+    print(f"Listening on PORT: {port}")
+    http_server.listen(port)
     tornado.ioloop.IOLoop.instance().start()
