@@ -12,7 +12,7 @@ from dotenv import load_dotenv
 from firebase_admin import credentials
 from firebase_admin import db
 from firebase_admin.credentials import Certificate
-from firebase_admin.db import Reference
+from firebase_admin.db import Reference, Query
 from tornado.escape import native_str, parse_qs_bytes
 from tornado.httpserver import HTTPServer
 from tornado.options import define, options
@@ -32,7 +32,7 @@ class BaseHandler(tornado.web.RequestHandler):
         self.set_header('Access-Control-Allow-Methods', 'POST, GET, OPTIONS')
 
     @staticmethod
-    def db(collection: str) -> Reference:
+    def db(collection: str) -> object:
         return db.reference(collection)
 
     def prepare(self) -> None:
@@ -59,9 +59,11 @@ class BaseHandler(tornado.web.RequestHandler):
                         'traceback': lines,
                 }))
         else:
+
+            reason = kwargs['reason'] if kwargs['reason'] else self._reason
             self.write(json.dumps({
                     'status_code': status_code,
-                    'message': self._reason,
+                    'message': reason,
                 }))
 
 
@@ -119,6 +121,54 @@ class MessageHandler(BaseHandler):
         }))
 
 
+class RaiseHandHandler(BaseHandler):
+    async def post(self) -> None:
+        data: Dict[str, str] = self.extract_data(['uid'])
+        privilege: Reference = self.db('privilege')
+
+        privilege.child(data['uid']).set({
+            'accepted': 'false'
+        })
+
+        self.write(json.dumps({
+            'status_code': 200,
+            'message': 'Requested Privilege'
+        }))
+
+
+class AcceptRequestHandler(BaseHandler):
+    async def post(self) -> None:
+        data: Dict[str, str] = self.extract_data(['uid'])
+        privilege: Reference = self.db('privilege')
+
+        user_ref: Dict[str, str] = privilege.child(data['uid']).get()
+        is_accepted: str = user_ref['accepted']
+
+        if is_accepted == 'true':
+            raise tornado.web.HTTPError(409, reason="User already privileged")
+
+        privilege.child(data['uid']).set({
+            'accepted': 'true'
+        })
+
+        self.write({
+            'status_code': 200,
+            'message': f'{data["uid"]} is now privileged'
+        })
+
+
+class RemoveFromListHandler(BaseHandler):
+    async def post(self) -> None:
+        data: Dict[str, str] = self.extract_data(['uid'])
+        privilege: Reference = self.db('privilege')
+        privilege.child(data['uid']).delete()
+
+        self.write(json.dumps({
+            'status_code': 200,
+            'message': f'{data["uid"]} removed'
+        }))
+
+
 if __name__ == "__main__":
     load_dotenv()
     options.parse_command_line()
@@ -135,8 +185,11 @@ if __name__ == "__main__":
             (r"/", PingHandler),
             (r"/auth", AuthHandler),
             (r"/post", MessageHandler),
+            (r"/add", RaiseHandHandler),
+            (r"/accept", AcceptRequestHandler),
+            (r"/delete", RemoveFromListHandler)
         ],
-        default_handler_class = my404handler,
+        default_handler_class=my404handler,
         debug=True,
         form_data={},
     )
